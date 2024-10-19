@@ -44,14 +44,17 @@ function generateChunk(chunkX, chunkZ) {
             // Generate height based on Simplex noise
             const height = Math.floor(simplex.noise2D((chunkX * chunkSize + x) * noiseScale, (chunkZ * chunkSize + z) * noiseScale) * chunkHeight);
 
-            for (let y = 0; y <= chunkHeight; y++) {
-                let texture = stoneTexture; // Default texture for blocks
-                if (y === height) {
-                    texture = grassTexture; // Grass on top
-                } else if (y < height) {
+            for (let y = 0; y <= height; y++) {
+                let texture = grassTexture; // Default texture for the top block
+                if (y < height - 1) {
                     texture = dirtTexture; // Dirt for blocks below the surface
                 }
-
+                if (y === height) {
+                    texture = grassTexture; // Grass on top
+                } else if (y < height - 1) {
+                    texture = stoneTexture; // Stone for below dirt
+                }
+                
                 const block = createBlock(chunkX * chunkSize + x, y, chunkZ * chunkSize + z, texture);
                 chunk.add(block);
             }
@@ -107,55 +110,66 @@ function makeNewWorld() {
     document.getElementById('message').textContent = "New world created!";
 }
 
-// Collision detection function
-function checkCollision(position) {
-    const chunkX = Math.floor(position.x / chunkSize);
-    const chunkZ = Math.floor(position.z / chunkSize);
-    const chunkKey = `${chunkX},${chunkZ}`;
-    const chunk = chunks[chunkKey];
+// Initial call to generate chunks based on the initial player position
+updateChunks();
 
-    if (chunk) {
-        for (let x = 0; x < chunkSize; x++) {
-            for (let z = 0; z < chunkSize; z++) {
-                for (let y = 0; y <= chunkHeight; y++) {
-                    const block = chunk.children.find(block => block.position.equals(new THREE.Vector3(x + chunkX * chunkSize, y, z + chunkZ * chunkSize)));
-                    if (block) {
-                        if (position.distanceTo(block.position) < 1) {
-                            return block.position; // Return the block's position if a collision is detected
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return null; // No collision
+// Position the camera to be just above the ground
+camera.position.set(25, 1.5, 25);
+
+// Player controls
+const playerSpeed = 0.1;
+const jumpForce = 0.2;
+let velocity = new THREE.Vector3(0, 0, 0);
+let isJumping = false;
+const keys = {};
+let mousePressed = false;
+let selectedBlock = null;
+
+window.addEventListener('keydown', (event) => {
+    keys[event.code] = true;
+});
+window.addEventListener('keyup', (event) => {
+    keys[event.code] = false;
+});
+
+// Function to lock the mouse pointer
+function lockPointer() {
+    document.body.requestPointerLock();
 }
+
+// Lock the pointer on mouse click
+document.body.addEventListener('click', lockPointer);
+
+// Mouse movement for looking around
+let pitch = 0;
+let yaw = 0;
+const lookSensitivity = 0.1;
+
+// Adjust the camera rotation logic to lock the Z-axis (roll)
+document.addEventListener('mousemove', (event) => {
+    if (document.pointerLockElement) {
+        yaw -= event.movementX * lookSensitivity;
+        pitch -= event.movementY * lookSensitivity;
+        pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+        camera.rotation.order = "YXZ";
+        camera.rotation.set(pitch, yaw, 0);
+    }
+});
 
 // Handle movement
 function updatePlayer() {
     velocity.set(0, 0, 0); // Reset velocity
 
-    // Calculate forward and right directions based on camera rotation
-    const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    camera.getWorldDirection(forward); // Get the forward direction
-    forward.y = 0; // Ignore vertical movement for walking
-    forward.normalize(); // Normalize the direction
-
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)); // Get the right direction
-
-    // Movement controls based on camera direction
-    if (keys['KeyW']) { // Move forward (W)
-        velocity.add(forward.clone().multiplyScalar(playerSpeed)); // Move in the forward direction
-    }
     if (keys['KeyS']) { // Move backward (S)
-        velocity.add(forward.clone().multiplyScalar(-playerSpeed)); // Move in the backward direction
+        velocity.z = playerSpeed; // Move forward
+    } else if (keys['KeyW']) { // Move forward (W)
+        velocity.z = -playerSpeed; // Move backward
     }
-    if (keys['KeyA']) { // Move left (A)
-        velocity.add(right.clone().multiplyScalar(-playerSpeed)); // Move in the left direction
-    }
-    if (keys['KeyD']) { // Move right (D)
-        velocity.add(right.clone().multiplyScalar(playerSpeed)); // Move in the right direction
+
+    if (keys['KeyA']) { // Move left
+        velocity.x = -playerSpeed;
+    } else if (keys['KeyD']) { // Move right
+        velocity.x = playerSpeed;
     }
 
     // Jumping logic
@@ -170,22 +184,15 @@ function updatePlayer() {
     }
 
     // Check for ground contact to reset jumping
-    const previousPosition = camera.position.clone();
+    if (camera.position.y <= 1.5) {
+        isJumping = false;
+        camera.position.y = 1.5; // Reset camera height
+    }
+
+    // Move the camera based on velocity
     camera.position.x += velocity.x;
     camera.position.y += velocity.y;
     camera.position.z += velocity.z;
-
-    // Check for collisions after moving
-    const collisionPoint = checkCollision(camera.position);
-    if (collisionPoint) {
-        camera.position.copy(previousPosition); // Revert to the previous position if a collision occurs
-    } else {
-        // Adjust height if the player is above a block
-        const heightAtPlayerPosition = Math.floor(simplex.noise2D(camera.position.x * noiseScale, camera.position.z * noiseScale) * chunkHeight);
-        if (camera.position.y < heightAtPlayerPosition + 1.5) {
-            camera.position.y = heightAtPlayerPosition + 1.5; // Set to the height of the terrain
-        }
-    }
 
     // Update visible chunks after moving
     updateChunks();
