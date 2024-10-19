@@ -60,7 +60,7 @@ function generateChunk(chunkX, chunkZ) {
                     texture = stoneTexture; // Stone for below dirt
                     type = 'stone';
                 }
-                
+
                 const block = createBlock(chunkX * chunkSize + x, y, chunkZ * chunkSize + z, texture, type);
                 chunk.add(block);
             }
@@ -150,7 +150,7 @@ document.body.appendChild(crosshair);
 function updateCrosshair() {
     const screenPosition = new THREE.Vector3(0, 0, -5).applyMatrix4(camera.matrixWorld);
     const vector = screenPosition.project(camera);
-    
+
     const x = (vector.x * .5 + .5) * window.innerWidth;
     const y = (-(vector.y * .5) + .5) * window.innerHeight;
 
@@ -188,22 +188,23 @@ function updatePlayer() {
 
     // Calculate the forward direction based on the camera's rotation, ignoring the Y-axis
     const forward = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
-    forward.y = 0; // Prevent upward movement
+    forward.y = 0; // Prevent upward movement when moving forward/backward
     forward.normalize(); // Normalize the vector
     const right = new THREE.Vector3(1, 0, 0).applyEuler(camera.rotation);
     right.normalize();
 
+    // Movement logic
     if (keys['KeyW']) { // Move forward (W)
-        velocity.add(forward.clone().multiplyScalar(playerSpeed)); // Move in the forward direction
+        velocity.add(forward.clone().multiplyScalar(playerSpeed)); // Move forward along XZ plane
     }
     if (keys['KeyS']) { // Move backward (S)
-        velocity.add(forward.clone().multiplyScalar(-playerSpeed)); // Move in the backward direction
+        velocity.add(forward.clone().multiplyScalar(-playerSpeed)); // Move backward along XZ plane
     }
     if (keys['KeyA']) { // Move left (A)
-        velocity.add(right.clone().multiplyScalar(-playerSpeed)); // Move in the left direction
+        velocity.add(right.clone().multiplyScalar(-playerSpeed)); // Move left along XZ plane
     }
     if (keys['KeyD']) { // Move right (D)
-        velocity.add(right.clone().multiplyScalar(playerSpeed)); // Move in the right direction
+        velocity.add(right.clone().multiplyScalar(playerSpeed)); // Move right along XZ plane
     }
 
     // Jumping logic
@@ -214,13 +215,13 @@ function updatePlayer() {
 
     // Apply gravity
     if (isJumping) {
-        velocity.y -= 0.01; // Apply a simple gravity
+        velocity.y -= 0.01; // Simple gravity
     }
 
     // Check for ground contact to reset jumping
     if (camera.position.y <= 1.5) {
         isJumping = false;
-        camera.position.y = 1.5; // Reset camera height
+        camera.position.y = 1.5; // Reset camera height to ground level
     } else {
         // Limit upward movement to prevent flying
         camera.position.y = Math.max(camera.position.y, 1.5);
@@ -241,40 +242,45 @@ function updatePlayer() {
     updateCrosshair(); // Update crosshair position
 }
 
-// Check for collisions with blocks
+// Function to check for collisions with blocks
 function checkCollisions(newPosition) {
-    const raycaster = new THREE.Raycaster();
-    const direction = newPosition.clone().sub(camera.position).normalize(); // Direction of movement
-    raycaster.set(camera.position, direction);
+    const blockX = Math.floor(newPosition.x);
+    const blockY = Math.floor(newPosition.y);
+    const blockZ = Math.floor(newPosition.z);
 
-    // Check for collisions with blocks in the scene
-    const intersects = raycaster.intersectObjects(scene.children, true); // Check all objects in the scene
+    const chunkX = Math.floor(blockX / chunkSize);
+    const chunkZ = Math.floor(blockZ / chunkSize);
 
-    if (intersects.length > 0) {
-        const distance = intersects[0].distance;
-        if (distance < 1) { // If collision is within 1 unit, block movement
-            return true;
+    const chunk = chunks[`${chunkX},${chunkZ}`];
+    if (!chunk) return false; // No chunk means no collision
+
+    for (let i = 0; i < chunk.children.length; i++) {
+        const block = chunk.children[i];
+        if (
+            Math.abs(block.position.x - newPosition.x) < 0.5 &&
+            Math.abs(block.position.y - newPosition.y) < 0.5 &&
+            Math.abs(block.position.z - newPosition.z) < 0.5
+        ) {
+            return true; // Collision detected
         }
     }
-    return false;
+    return false; // No collision
 }
 
-// Handle keyboard input
+// Keyboard event listeners
 document.addEventListener('keydown', (event) => {
     keys[event.code] = true;
 });
-
 document.addEventListener('keyup', (event) => {
     keys[event.code] = false;
 });
 
-// Render loop
+// Main game loop
 function animate() {
     requestAnimationFrame(animate);
-    updatePlayer(); // Update player position
-    updateChunks(); // Update visible chunks
-    renderer.render(scene, camera);
+    updatePlayer(); // Update player movement
+    updateChunks(); // Update the chunks around the player
+    renderer.render(scene, camera); // Render the scene
 }
 
-// Start the animation loop
-animate();
+animate(); // Start the animation loop
