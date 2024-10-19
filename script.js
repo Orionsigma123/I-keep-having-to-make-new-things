@@ -28,11 +28,12 @@ let simplex = new SimplexNoise(); // Initialize SimplexNoise
 const chunks = {}; // Object to store generated chunks
 
 // Function to create a block
-function createBlock(x, y, z, texture) {
+function createBlock(x, y, z, texture, type) {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ map: texture });
     const block = new THREE.Mesh(geometry, material);
     block.position.set(x, y, z);
+    block.userData = { type }; // Add type to block for identification
     return block;
 }
 
@@ -46,16 +47,21 @@ function generateChunk(chunkX, chunkZ) {
 
             for (let y = 0; y <= height; y++) {
                 let texture = grassTexture; // Default texture for the top block
+                let type = 'grass'; // Default block type
+
                 if (y < height - 1) {
                     texture = dirtTexture; // Dirt for blocks below the surface
+                    type = 'dirt';
                 }
                 if (y === height) {
                     texture = grassTexture; // Grass on top
+                    type = 'grass';
                 } else if (y < height - 1) {
                     texture = stoneTexture; // Stone for below dirt
+                    type = 'stone';
                 }
                 
-                const block = createBlock(chunkX * chunkSize + x, y, chunkZ * chunkSize + z, texture);
+                const block = createBlock(chunkX * chunkSize + x, y, chunkZ * chunkSize + z, texture, type);
                 chunk.add(block);
             }
         }
@@ -125,12 +131,32 @@ const keys = {};
 let mousePressed = false;
 let selectedBlock = null;
 
-window.addEventListener('keydown', (event) => {
-    keys[event.code] = true;
-});
-window.addEventListener('keyup', (event) => {
-    keys[event.code] = false;
-});
+// Crosshair setup
+const crosshairSize = 10; // Crosshair size in pixels
+const crosshairColor = 'red'; // Crosshair color
+
+// Create a crosshair element
+const crosshair = document.createElement('div');
+crosshair.style.position = 'absolute';
+crosshair.style.width = `${crosshairSize}px`;
+crosshair.style.height = `${crosshairSize}px`;
+crosshair.style.backgroundColor = crosshairColor;
+crosshair.style.border = `1px solid ${crosshairColor}`;
+crosshair.style.transform = 'translate(-50%, -50%)';
+crosshair.style.pointerEvents = 'none'; // Prevent mouse events on the crosshair
+document.body.appendChild(crosshair);
+
+// Update crosshair position
+function updateCrosshair() {
+    const screenPosition = new THREE.Vector3(0, 0, -5).applyMatrix4(camera.matrixWorld);
+    const vector = screenPosition.project(camera);
+    
+    const x = (vector.x * .5 + .5) * window.innerWidth;
+    const y = (-(vector.y * .5) + .5) * window.innerHeight;
+
+    crosshair.style.left = `${x}px`;
+    crosshair.style.top = `${y}px`;
+}
 
 // Function to lock the mouse pointer
 function lockPointer() {
@@ -156,20 +182,29 @@ document.addEventListener('mousemove', (event) => {
     }
 });
 
-// Handle movement
+// Function to handle player movement based on head orientation
 function updatePlayer() {
     velocity.set(0, 0, 0); // Reset velocity
 
-    if (keys['KeyS']) { // Move backward (S)
-        velocity.z = playerSpeed; // Move forward
-    } else if (keys['KeyW']) { // Move forward (W)
-        velocity.z = -playerSpeed; // Move backward
-    }
+    // Calculate the forward direction based on the camera's rotation
+    const forward = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
+    const right = new THREE.Vector3(1, 0, 0).applyEuler(camera.rotation);
 
-    if (keys['KeyA']) { // Move left
-        velocity.x = -playerSpeed;
-    } else if (keys['KeyD']) { // Move right
-        velocity.x = playerSpeed;
+    // Normalize the forward and right vectors
+    forward.normalize();
+    right.normalize();
+
+    if (keys['KeyW']) { // Move forward (W)
+        velocity.add(forward.clone().multiplyScalar(playerSpeed)); // Move in the forward direction
+    }
+    if (keys['KeyS']) { // Move backward (S)
+        velocity.add(forward.clone().multiplyScalar(-playerSpeed)); // Move in the backward direction
+    }
+    if (keys['KeyA']) { // Move left (A)
+        velocity.add(right.clone().multiplyScalar(-playerSpeed)); // Move in the left direction
+    }
+    if (keys['KeyD']) { // Move right (D)
+        velocity.add(right.clone().multiplyScalar(playerSpeed)); // Move in the right direction
     }
 
     // Jumping logic
@@ -187,6 +222,9 @@ function updatePlayer() {
     if (camera.position.y <= 1.5) {
         isJumping = false;
         camera.position.y = 1.5; // Reset camera height
+    } else {
+        // Limit upward movement to prevent flying
+        camera.position.y = Math.max(camera.position.y, 1.5);
     }
 
     // Move the camera based on velocity
@@ -198,15 +236,63 @@ function updatePlayer() {
     updateChunks();
 }
 
-// Animation loop
-function animate() {
-    requestAnimationFrame(animate);
-    updatePlayer();
-    renderer.render(scene, camera);
+// Mouse down event to start breaking blocks
+document.addEventListener('mousedown', (event) => {
+    if (event.button === 0) { // Left mouse button
+        mousePressed = true;
+        breakBlock();
+    }
+});
+
+// Mouse up event to stop breaking blocks
+document.addEventListener('mouseup', (event) => {
+    if (event.button === 0) { // Left mouse button
+        mousePressed = false;
+    }
+});
+
+// Function to find and break a block
+function breakBlock() {
+    // Raycaster for block detection
+    const raycaster = new THREE.Raycaster();
+    const direction = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
+    raycaster.set(camera.position, direction);
+
+    const intersects = raycaster.intersectObjects(scene.children);
+    if (intersects.length > 0) {
+        const block = intersects[0].object;
+        const blockType = block.userData.type; // Get block type
+
+        let breakTime = 0;
+        if (blockType === 'grass') breakTime = 500; // Grass takes 0.5 seconds
+        else if (blockType === 'stone') breakTime = 3000; // Cobblestone takes 3 seconds
+
+        // Handle breaking logic
+        setTimeout(() => {
+            scene.remove(block); // Remove block from the scene
+            inventory.push(blockType); // Add block type to inventory
+            console.log(`You broke a ${blockType}!`); // Log the broken block type
+        }, breakTime);
+    }
 }
 
-// Add event listener for the new world button
-document.getElementById('newWorldButton').addEventListener('click', makeNewWorld);
+// Function to handle key presses
+document.addEventListener('keydown', (event) => {
+    keys[event.code] = true; // Set key as pressed
+});
 
-// Initialize the animation loop
+// Function to handle key releases
+document.addEventListener('keyup', (event) => {
+    keys[event.code] = false; // Set key as released
+});
+
+// Animate the scene
+function animate() {
+    requestAnimationFrame(animate);
+    updatePlayer(); // Update player movement
+    updateCrosshair(); // Update crosshair position
+    renderer.render(scene, camera); // Render the scene
+}
+
+// Start animation loop
 animate();
