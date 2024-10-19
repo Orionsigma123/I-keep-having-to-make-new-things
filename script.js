@@ -186,12 +186,11 @@ document.addEventListener('mousemove', (event) => {
 function updatePlayer() {
     velocity.set(0, 0, 0); // Reset velocity
 
-    // Calculate the forward direction based on the camera's rotation
+    // Calculate the forward direction based on the camera's rotation, ignoring the Y-axis
     const forward = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
+    forward.y = 0; // Prevent upward movement
+    forward.normalize(); // Normalize the vector
     const right = new THREE.Vector3(1, 0, 0).applyEuler(camera.rotation);
-
-    // Normalize the forward and right vectors
-    forward.normalize();
     right.normalize();
 
     if (keys['KeyW']) { // Move forward (W)
@@ -227,72 +226,55 @@ function updatePlayer() {
         camera.position.y = Math.max(camera.position.y, 1.5);
     }
 
-    // Move the camera based on velocity
-    camera.position.x += velocity.x;
-    camera.position.y += velocity.y;
-    camera.position.z += velocity.z;
+    // Calculate the potential new position
+    const newPosition = camera.position.clone().add(velocity);
 
-    // Update visible chunks after moving
-    updateChunks();
+    // Check for collisions
+    if (!checkCollisions(newPosition)) {
+        // No collision, update the player's position
+        camera.position.copy(newPosition);
+    } else {
+        // Collision detected, stop movement
+        velocity.set(0, 0, 0);
+    }
+
+    updateCrosshair(); // Update crosshair position
 }
 
-// Mouse down event to start breaking blocks
-document.addEventListener('mousedown', (event) => {
-    if (event.button === 0) { // Left mouse button
-        mousePressed = true;
-        breakBlock();
-    }
-});
-
-// Mouse up event to stop breaking blocks
-document.addEventListener('mouseup', (event) => {
-    if (event.button === 0) { // Left mouse button
-        mousePressed = false;
-    }
-});
-
-// Function to find and break a block
-function breakBlock() {
-    // Raycaster for block detection
+// Check for collisions with blocks
+function checkCollisions(newPosition) {
     const raycaster = new THREE.Raycaster();
-    const direction = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
+    const direction = newPosition.clone().sub(camera.position).normalize(); // Direction of movement
     raycaster.set(camera.position, direction);
 
-    const intersects = raycaster.intersectObjects(scene.children);
+    // Check for collisions with blocks in the scene
+    const intersects = raycaster.intersectObjects(scene.children, true); // Check all objects in the scene
+
     if (intersects.length > 0) {
-        const block = intersects[0].object;
-        const blockType = block.userData.type; // Get block type
-
-        let breakTime = 0;
-        if (blockType === 'grass') breakTime = 500; // Grass takes 0.5 seconds
-        else if (blockType === 'stone') breakTime = 3000; // Cobblestone takes 3 seconds
-
-        // Handle breaking logic
-        setTimeout(() => {
-            scene.remove(block); // Remove block from the scene
-            inventory.push(blockType); // Add block type to inventory
-            console.log(`You broke a ${blockType}!`); // Log the broken block type
-        }, breakTime);
+        const distance = intersects[0].distance;
+        if (distance < 1) { // If collision is within 1 unit, block movement
+            return true;
+        }
     }
+    return false;
 }
 
-// Function to handle key presses
+// Handle keyboard input
 document.addEventListener('keydown', (event) => {
-    keys[event.code] = true; // Set key as pressed
+    keys[event.code] = true;
 });
 
-// Function to handle key releases
 document.addEventListener('keyup', (event) => {
-    keys[event.code] = false; // Set key as released
+    keys[event.code] = false;
 });
 
-// Animate the scene
+// Render loop
 function animate() {
     requestAnimationFrame(animate);
-    updatePlayer(); // Update player movement
-    updateCrosshair(); // Update crosshair position
-    renderer.render(scene, camera); // Render the scene
+    updatePlayer(); // Update player position
+    updateChunks(); // Update visible chunks
+    renderer.render(scene, camera);
 }
 
-// Start animation loop
+// Start the animation loop
 animate();
